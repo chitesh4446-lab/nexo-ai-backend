@@ -1,34 +1,49 @@
 from fastapi import FastAPI, File, UploadFile
-from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import StreamingResponse
-from rembg import remove
+from fastapi.responses import StreamingResponse, JSONResponse
+from rembg import remove, new_session
 from PIL import Image
 import io
 
 app = FastAPI()
 
-# CORS allow (important for frontend)
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+# ✅ Load light model once (important for RAM)
+session = new_session("u2netp")
 
 @app.get("/")
 def home():
-    return {"message": "NEXO AI Backend Running (CPU Mode)"}
+    return {"message": "NEXO AI Backend Running - Optimized Free Version"}
 
 @app.post("/remove-bg")
 async def remove_bg(file: UploadFile = File(...)):
+
+    input_bytes = await file.read()
+
+    # ✅ 2MB size limit (free server safe)
+    if len(input_bytes) > 2 * 1024 * 1024:
+        return JSONResponse(
+            content={"error": "Image too large. Max 2MB allowed."},
+            status_code=400
+        )
+
     try:
-        input_bytes = await file.read()
-        output_bytes = remove(input_bytes)
+        # ✅ Resize image to reduce RAM usage
+        image = Image.open(io.BytesIO(input_bytes))
+        image.thumbnail((800, 800))  # maintain aspect ratio
+
+        buffer = io.BytesIO()
+        image.save(buffer, format="PNG")
+        resized_bytes = buffer.getvalue()
+
+        # ✅ Remove background
+        output_bytes = remove(resized_bytes, session=session)
 
         return StreamingResponse(
             io.BytesIO(output_bytes),
             media_type="image/png"
         )
+
     except Exception as e:
-        return {"error": str(e)}
+        return JSONResponse(
+            content={"error": str(e)},
+            status_code=500
+        )
